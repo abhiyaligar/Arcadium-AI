@@ -22,41 +22,84 @@ export function TeamDetailsModal({ team, onClose, onUpdate }: TeamDetailsModalPr
   const [sendingMsg, setSendingMsg] = useState(false);
   const [activeTab, setActiveTab] = useState<'chat' | 'members'>('chat');
 
-  useEffect(() => {
-    fetchMembers();
-    fetchMessages();
+  const [loadingMessages, setLoadingMessages] = useState(false);
 
-    // Poll for new messages every 5 seconds since real-time/websockets are disabled
-    const interval = setInterval(fetchMessages, 5000);
+  useEffect(() => {
+    fetchMembers(true);
+    fetchMessages(true);
+
+    // Poll for changes since real-time is disabled
+    const interval = setInterval(() => {
+      fetchMessages(false);
+      fetchMembers(false);
+    }, 5000);
     return () => clearInterval(interval);
   }, [team.id]);
 
-  async function fetchMembers() {
-    setLoadingMembers(true);
+  async function fetchMembers(showLoading = true) {
+    if (showLoading) setLoadingMembers(true);
     const { data, error } = await supabase
       .from('team_members')
       .select('*, profiles(full_name, email, avatar_url, student_id)')
       .eq('team_id', team.id);
     
+    if (error) console.error('Error fetching members:', error);
     if (data) setMembers(data);
     setLoadingMembers(false);
   }
 
-  async function fetchMessages() {
-    const { data, error } = await supabase
-      .from('messages')
-      .select('*, profiles(full_name, avatar_url)')
-      .eq('team_id', team.id)
-      .order('created_at', { ascending: true });
-    
-    if (data) {
-      // Map fields if necessary to match expected UI usage
-      const formattedMessages = data.map((msg: any) => ({
-        ...msg,
-        content: msg.text || msg.content, // Fallback for flexibility
-        profile_id: msg.sender_id || msg.profile_id
-      }));
-      setMessages(formattedMessages);
+  async function fetchMessages(showLoading = false) {
+    if (showLoading) setLoadingMessages(true);
+    try {
+      // First attempt with preferred names and explicit join
+      const { data, error } = await supabase
+        .from('messages')
+        .select(`
+          *,
+          profiles(full_name, avatar_url)
+        `)
+        .eq('team_id', team.id)
+        .order('created_at', { ascending: true });
+      
+      if (error) {
+        // Retry with a simpler select if the join/columns fail
+        console.warn('Initial fetch failed, retrying simple select:', error);
+        const { data: simpleData, error: simpleError } = await supabase
+          .from('messages')
+          .select('*')
+          .eq('team_id', team.id)
+          .order('created_at', { ascending: true });
+        
+        if (simpleError) {
+          console.error('Fetch messages failed completely:', simpleError);
+          return;
+        }
+        
+        if (simpleData) {
+          // Map to handle different possible column names
+          const formatted = simpleData.map((m: any) => ({
+            ...m,
+            content: m.content || m.text || m.message || 'No content',
+            profile_id: m.profile_id || m.sender_id || m.user_id
+          }));
+          setMessages(formatted);
+        }
+      } else if (data) {
+        // Ensure consistent structure and handle array/object profiles
+        const formatted = data.map((m: any) => {
+          const profileInfo = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles;
+          return {
+            ...m,
+            display_profiles: profileInfo,
+            content: m.content || m.text || m.message || 'No content'
+          };
+        });
+        setMessages(formatted);
+      }
+    } catch (e: any) {
+      console.error('Fetch messages exception:', e);
+    } finally {
+      if (showLoading) setLoadingMessages(false);
     }
   }
 
@@ -115,25 +158,28 @@ export function TeamDetailsModal({ team, onClose, onUpdate }: TeamDetailsModalPr
 
     setSendingMsg(true);
     try {
+      // Try profile_id/content first (matching schema)
       const { error } = await supabase
         .from('messages')
         .insert({
           team_id: team.id,
-          sender_id: user.id, // Try sender_id first
-          text: newMessage    // Try text first
+          profile_id: user.id,
+          content: newMessage
         });
 
       if (error) {
-        // If sender_id/text fail, try profile_id/content as fallback
+        console.warn('First insert failed, retrying with fallback columns:', error);
+        // Fallback to sender_id/text
         const { error: retryError } = await supabase
           .from('messages')
           .insert({
             team_id: team.id,
-            profile_id: user.id,
-            content: newMessage
-          });
+            sender_id: user.id,
+            text: newMessage
+          } as any);
         if (retryError) throw retryError;
       }
+      
       setNewMessage('');
       fetchMessages();
     } catch (e: any) {
@@ -145,8 +191,10 @@ export function TeamDetailsModal({ team, onClose, onUpdate }: TeamDetailsModalPr
 
   const pendingMembers = members.filter(m => m.status === 'pending');
   const approvedMembers = members.filter(m => m.status === 'approved');
+  
+  // Use both the fetched members and the team object passed from parent for more robust check
   const myMemberInfo = members.find(m => m.profile_id === user?.id);
-  const isApproved = myMemberInfo?.status === 'approved' || team.is_leader;
+  const isApproved = myMemberInfo?.status === 'approved' || team.my_status === 'approved' || team.is_leader;
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/90 backdrop-blur-md p-4">
@@ -198,7 +246,12 @@ export function TeamDetailsModal({ team, onClose, onUpdate }: TeamDetailsModalPr
             <div className="flex-1 flex flex-col">
               {/* Messages Area */}
               <div className="flex-1 overflow-y-auto p-8 space-y-6 custom-scrollbar">
-                {!isApproved ? (
+                {loadingMembers ? (
+                  <div className="h-full flex flex-col items-center justify-center">
+                    <Loader2 className="animate-spin text-indigo-500 mb-2" size={32} />
+                    <p className="text-[10px] font-mono text-slate-500 uppercase tracking-widest">Validating Signal...</p>
+                  </div>
+                ) : !isApproved ? (
                   <div className="h-full flex flex-col items-center justify-center text-center space-y-6 max-w-sm mx-auto">
                     <div className="p-6 bg-orange-500/10 rounded-3xl text-orange-500">
                       <Shield size={48} className="animate-pulse" />
@@ -239,7 +292,7 @@ export function TeamDetailsModal({ team, onClose, onUpdate }: TeamDetailsModalPr
                         msg.profile_id === user?.id ? "ml-auto items-end" : "items-start"
                       )}>
                         <div className="flex items-center gap-2 mb-1">
-                          <span className="text-[10px] font-mono text-slate-500 uppercase">{msg.profiles?.full_name}</span>
+                          <span className="text-[10px] font-mono text-slate-500 uppercase">{msg.display_profiles?.full_name || 'SIGNAL UNKNOWN'}</span>
                         </div>
                         <div className={cn(
                           "px-4 py-3 rounded-2xl text-sm",
