@@ -16,7 +16,7 @@ export function LandingPage({ onAuthClick }: LandingPageProps) {
             <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center rotate-3 hover:rotate-0 transition-transform cursor-pointer">
               <Zap className="text-white fill-white" size={24} />
             </div>
-            <span className="text-2xl font-bold tracking-tighter">FESTIFLOW</span>
+            <span className="text-2xl font-bold tracking-tighter">ARCADIUM AI</span>
           </div>
           <button 
             onClick={onAuthClick}
@@ -105,7 +105,7 @@ export function LandingPage({ onAuthClick }: LandingPageProps) {
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-8">
           <div className="flex items-center gap-2 opacity-50">
             <Zap size={20} />
-            <span className="font-bold tracking-tighter">FESTIFLOW</span>
+            <span className="font-bold tracking-tighter">ARCADIUM AI</span>
           </div>
           <p className="text-slate-500 text-sm font-mono uppercase tracking-widest">
             Made for the next generation of creators.

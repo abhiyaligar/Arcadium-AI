@@ -83,7 +83,7 @@ export function AuthForm({ onBack }: AuthFormProps) {
             <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center rotate-6">
               <Zap className="text-indigo-600 fill-indigo-600" size={32} />
             </div>
-            <h1 className="text-4xl font-black italic tracking-tighter">FESTIFLOW</h1>
+            <h1 className="text-4xl font-black italic tracking-tighter">ARCADIUM AI</h1>
           </div>
           
           <h2 className="text-5xl font-bold leading-tight mb-8">
@@ -115,7 +115,7 @@ export function AuthForm({ onBack }: AuthFormProps) {
           <div className="mb-10 block md:hidden">
             <div className="flex items-center gap-2 mb-4">
               <Zap className="text-indigo-500" />
-              <span className="font-bold tracking-tighter text-xl italic">FESTIFLOW</span>
+              <span className="font-bold tracking-tighter text-xl italic">ARCADIUM AI</span>
             </div>
           </div>
 

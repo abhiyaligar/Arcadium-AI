@@ -5,6 +5,8 @@ import { X, Check, Trash2, MessageSquare, Users, Shield, Send, Loader2 } from 'l
 import { toast } from 'react-hot-toast';
 import { cn } from '../lib/utils';
 
+import { EmailService } from '../services/emailService';
+
 interface TeamDetailsModalProps {
   team: any;
   onClose: () => void;
@@ -33,7 +35,7 @@ export function TeamDetailsModal({ team, onClose, onUpdate }: TeamDetailsModalPr
     setLoadingMembers(true);
     const { data, error } = await supabase
       .from('team_members')
-      .select('*, profiles(full_name, avatar_url, student_id)')
+      .select('*, profiles(full_name, email, avatar_url, student_id)')
       .eq('team_id', team.id);
     
     if (data) setMembers(data);
@@ -47,10 +49,20 @@ export function TeamDetailsModal({ team, onClose, onUpdate }: TeamDetailsModalPr
       .eq('team_id', team.id)
       .order('created_at', { ascending: true });
     
-    if (data) setMessages(data);
+    if (data) {
+      // Map fields if necessary to match expected UI usage
+      const formattedMessages = data.map((msg: any) => ({
+        ...msg,
+        content: msg.text || msg.content, // Fallback for flexibility
+        profile_id: msg.sender_id || msg.profile_id
+      }));
+      setMessages(formattedMessages);
+    }
   }
 
-  const handleApprove = async (memberId: string) => {
+  const handleApprove = async (memberId: string, name: string) => {
+    if (!confirm(`APPROVE "${name.toUpperCase()}" TO JOIN THE SQUAD?`)) return;
+    
     try {
       const { error } = await supabase
         .from('team_members')
@@ -59,12 +71,39 @@ export function TeamDetailsModal({ team, onClose, onUpdate }: TeamDetailsModalPr
 
       if (error) throw error;
       
+      // Send approval email
+      const member = members.find(m => m.id === memberId);
+      const mProfileData = member?.profiles;
+      const mProfile = Array.isArray(mProfileData) ? mProfileData[0] : mProfileData;
+      
+      if (mProfile?.email) {
+        EmailService.sendJoinSquadApproval(mProfile.email, mProfile.full_name, team.name);
+      }
+
       // Increment member count in teams table
       await supabase.rpc('increment_team_count', { team_id_input: team.id });
       
-      toast.success('Member approved!');
+      toast.success(`${name} is now a squad member!`);
       fetchMembers();
       onUpdate();
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  };
+
+  const handleDecline = async (memberId: string, name: string) => {
+    if (!confirm(`DECLINE "${name.toUpperCase()}"'S REQUEST?`)) return;
+    
+    try {
+      const { error } = await supabase
+        .from('team_members')
+        .delete()
+        .eq('id', memberId);
+
+      if (error) throw error;
+      
+      toast.success('Request declined');
+      fetchMembers();
     } catch (e: any) {
       toast.error(e.message);
     }
@@ -80,11 +119,21 @@ export function TeamDetailsModal({ team, onClose, onUpdate }: TeamDetailsModalPr
         .from('messages')
         .insert({
           team_id: team.id,
-          profile_id: user.id,
-          content: newMessage
+          sender_id: user.id, // Try sender_id first
+          text: newMessage    // Try text first
         });
 
-      if (error) throw error;
+      if (error) {
+        // If sender_id/text fail, try profile_id/content as fallback
+        const { error: retryError } = await supabase
+          .from('messages')
+          .insert({
+            team_id: team.id,
+            profile_id: user.id,
+            content: newMessage
+          });
+        if (retryError) throw retryError;
+      }
       setNewMessage('');
       fetchMessages();
     } catch (e: any) {
@@ -161,28 +210,53 @@ export function TeamDetailsModal({ team, onClose, onUpdate }: TeamDetailsModalPr
                       </p>
                     </div>
                   </div>
-                ) : messages.length > 0 ? messages.map((msg) => (
-                  <div key={msg.id} className={cn(
-                    "flex flex-col gap-1 max-w-[80%]",
-                    msg.profile_id === user?.id ? "ml-auto items-end" : "items-start"
-                  )}>
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-[10px] font-mono text-slate-500 uppercase">{msg.profiles?.full_name}</span>
-                    </div>
-                    <div className={cn(
-                      "px-4 py-3 rounded-2xl text-sm",
-                      msg.profile_id === user?.id 
-                        ? "bg-indigo-600 text-white rounded-tr-none" 
-                        : "bg-white/5 text-slate-200 rounded-tl-none border border-white/5"
-                    )}>
-                      {msg.content}
-                    </div>
-                  </div>
-                )) : (
-                  <div className="h-full flex flex-col items-center justify-center text-center space-y-4 opacity-30">
-                    <MessageSquare size={48} />
-                    <p className="text-xs font-mono uppercase tracking-widest">No signals detected yet...</p>
-                  </div>
+                ) : (
+                  <>
+                    {team.is_leader && pendingMembers.length > 0 && (
+                      <div className="mb-6 p-4 rounded-2xl bg-orange-500/10 border border-orange-500/20 flex items-center justify-between animate-in slide-in-from-top duration-500">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 bg-orange-500 rounded-lg text-white">
+                            <Shield size={16} />
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-mono font-black text-orange-500 uppercase tracking-widest">
+                              {pendingMembers.length} NEW SQUAD REQUESTS
+                            </p>
+                            <p className="text-[8px] text-orange-500/60 font-mono uppercase tracking-tighter mt-0.5">Awaiting your approval in Squad List</p>
+                          </div>
+                        </div>
+                        <button 
+                          onClick={() => setActiveTab('members')}
+                          className="text-[10px] font-black uppercase tracking-widest bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-xl transition-all shadow-lg shadow-orange-500/20"
+                        >
+                          Review
+                        </button>
+                      </div>
+                    )}
+                    {messages.length > 0 ? messages.map((msg) => (
+                      <div key={msg.id} className={cn(
+                        "flex flex-col gap-1 max-w-[80%]",
+                        msg.profile_id === user?.id ? "ml-auto items-end" : "items-start"
+                      )}>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-[10px] font-mono text-slate-500 uppercase">{msg.profiles?.full_name}</span>
+                        </div>
+                        <div className={cn(
+                          "px-4 py-3 rounded-2xl text-sm",
+                          msg.profile_id === user?.id 
+                            ? "bg-indigo-600 text-white rounded-tr-none" 
+                            : "bg-white/5 text-slate-200 rounded-tl-none border border-white/5"
+                        )}>
+                          {msg.content}
+                        </div>
+                      </div>
+                    )) : (
+                      <div className="h-full flex flex-col items-center justify-center text-center space-y-4 opacity-30">
+                        <MessageSquare size={48} />
+                        <p className="text-xs font-mono uppercase tracking-widest">No signals detected yet...</p>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
 
@@ -227,12 +301,15 @@ export function TeamDetailsModal({ team, onClose, onUpdate }: TeamDetailsModalPr
                         </div>
                         <div className="flex gap-2">
                           <button 
-                            onClick={() => handleApprove(m.id)}
+                            onClick={() => handleApprove(m.id, m.profiles?.full_name || 'User')}
                             className="p-3 bg-green-500 hover:bg-green-600 text-white rounded-xl transition-all shadow-lg shadow-green-500/20"
                           >
                             <Check size={20} />
                           </button>
-                          <button className="p-3 bg-white/5 hover:bg-red-500/10 text-slate-500 hover:text-red-500 rounded-xl transition-all">
+                          <button 
+                            onClick={() => handleDecline(m.id, m.profiles?.full_name || 'User')}
+                            className="p-3 bg-white/5 hover:bg-red-500/10 text-slate-500 hover:text-red-500 rounded-xl transition-all"
+                          >
                             <Trash2 size={20} />
                           </button>
                         </div>

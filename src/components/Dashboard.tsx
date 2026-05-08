@@ -75,7 +75,7 @@ export function Dashboard() {
             <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
               <Plus className="text-white" size={18} />
             </div>
-            <span className="text-xl font-black italic tracking-tighter">FESTIFLOW</span>
+            <span className="text-xl font-black italic tracking-tighter uppercase">Arcadium AI</span>
           </div>
 
           <nav className="flex-1 space-y-2">

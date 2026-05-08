@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Users, UserPlus, Shield, MessageSquare, ArrowRight, Star, Loader2, User, Lock } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { motion } from 'motion/react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/AuthContext';
 import { TeamForm } from './TeamForm';
 import { TeamDetailsModal } from './TeamDetailsModal';
 import { toast } from 'react-hot-toast';
+import { EmailService } from '../services/emailService';
 
 export function TeamManagement() {
   const { profile, user } = useAuth();
@@ -39,6 +39,21 @@ export function TeamManagement() {
         });
 
       if (error) throw error;
+      
+      // Notify team leader
+      const { data: teamData } = await supabase
+        .from('teams')
+        .select('name, team_members(profiles(email, full_name))')
+        .eq('id', teamId)
+        .eq('team_members.role', 'leader')
+        .single();
+
+      const leaderProfile = teamData?.team_members?.[0]?.profiles;
+      const leader = Array.isArray(leaderProfile) ? leaderProfile[0] : leaderProfile;
+      
+      if (leader?.email && profile) {
+        EmailService.sendJoinSquadRequest(leader.email, leader.full_name, profile.full_name, teamData.name);
+      }
 
       toast.success('Join request sent! Waiting for leader approval.');
       fetchTeams();
@@ -154,7 +169,18 @@ export function TeamManagement() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {teams.length > 0 ? teams.map((team) => (
-          <div key={team.id} className="p-8 rounded-[32px] bg-[#0d0d0d] border border-white/5 relative group overflow-hidden hover:border-indigo-500/50 transition-all">
+          <div 
+            key={team.id} 
+            onClick={() => {
+              if (team.is_leader || team.my_status !== 'pending') {
+                setSelectedTeamForManage(team);
+              }
+            }}
+            className={cn(
+              "p-8 rounded-[32px] bg-[#0d0d0d] border border-white/5 relative group overflow-hidden transition-all cursor-pointer",
+              team.is_leader ? "hover:border-indigo-500/50" : (team.my_status === 'pending' ? "opacity-60 grayscale cursor-not-allowed" : "hover:border-indigo-500/50")
+            )}
+          >
             <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 blur-3xl rounded-full" />
             
             <div className="flex justify-between items-start mb-8">
@@ -168,7 +194,7 @@ export function TeamManagement() {
                   )}
                 </div>
                 <p className="text-xs font-mono text-indigo-400 uppercase tracking-widest">{team.events?.title}</p>
-                {team.my_status === 'pending' && (
+                {!team.is_leader && team.my_status === 'pending' && (
                   <p className="text-[10px] font-mono text-orange-500 uppercase mt-1 animate-pulse">Request Pending Approval</p>
                 )}
               </div>
@@ -196,18 +222,24 @@ export function TeamManagement() {
               
               <div className="flex gap-2">
                 <button 
-                  disabled={team.my_status === 'pending'}
-                  onClick={() => setSelectedTeamForManage(team)}
+                  disabled={!team.is_leader && team.my_status === 'pending'}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedTeamForManage(team);
+                  }}
                   className={cn(
                     "p-3 rounded-xl transition-colors",
-                    team.my_status === 'pending' ? "bg-white/2 text-slate-700 cursor-not-allowed" : "bg-white/5 hover:bg-white/10 text-white"
+                    (!team.is_leader && team.my_status === 'pending') ? "bg-white/2 text-slate-700 cursor-not-allowed" : "bg-white/5 hover:bg-white/10 text-white"
                   )}
                 >
                   <MessageSquare size={18} />
                 </button>
                 {team.is_leader && (
                   <button 
-                    onClick={() => setSelectedTeamForManage(team)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedTeamForManage(team);
+                    }}
                     className="p-3 bg-indigo-600/10 hover:bg-indigo-600 text-indigo-400 hover:text-white rounded-xl transition-all"
                   >
                     <Star size={18} />

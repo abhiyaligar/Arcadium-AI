@@ -16,6 +16,7 @@ import {
 import { formatDate, generateTicketId, cn } from '../lib/utils';
 import { toast } from 'react-hot-toast';
 import { Event } from '../types';
+import { EmailService } from '../services/emailService';
 
 interface EventDetailsProps {
   eventId: string;
@@ -89,6 +90,11 @@ export function EventDetails({ eventId, onClose, onRegistered }: EventDetailsPro
         });
 
       if (regError) throw regError;
+
+      // Send confirmation email
+      if (profile?.email && event) {
+        EmailService.sendEventRegistrationConfirmation(profile.email, profile.full_name, event.title, ticketId);
+      }
 
       // Update participant count
       if (event) {
