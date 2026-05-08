@@ -18,6 +18,9 @@ export function TeamManagement() {
   const [selectedTeamForManage, setSelectedTeamForManage] = useState<any>(null);
   const [joinKeyInput, setJoinKeyInput] = useState('');
   const [findingSquad, setFindingSquad] = useState(false);
+  const [teamSearchTerm, setTeamSearchTerm] = useState('');
+  const [globalSearchTerm, setGlobalSearchTerm] = useState('');
+  const [searchingGlobal, setSearchingGlobal] = useState(false);
 
   useEffect(() => {
     if (profile) {
@@ -92,6 +95,36 @@ export function TeamManagement() {
     }
   }
 
+  const searchGlobalTeams = async () => {
+    if (!globalSearchTerm.trim()) {
+      fetchTeams();
+      return;
+    }
+    setSearchingGlobal(true);
+    try {
+      const { data, error } = await supabase
+        .from('teams')
+        .select(`
+          id, name, member_count, is_open, events(title, category)
+        `)
+        .eq('is_open', true)
+        .ilike('name', `%${globalSearchTerm}%`)
+        .limit(12);
+      
+      if (error) throw error;
+      setOpenRecruitments(data || []);
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSearchingGlobal(false);
+    }
+  };
+
+  const filteredMyTeams = teams.filter(t => 
+    t.name.toLowerCase().includes(teamSearchTerm.toLowerCase()) ||
+    t.events?.title?.toLowerCase().includes(teamSearchTerm.toLowerCase())
+  );
+
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
       {/* Join by Code Section */}
@@ -149,13 +182,24 @@ export function TeamManagement() {
           <h2 className="text-4xl font-black italic tracking-tighter mb-2">MY TEAMS</h2>
           <p className="text-slate-500 font-mono text-xs uppercase tracking-widest">Collaborate with your squad to achieve victory.</p>
         </div>
-        <button 
-          onClick={() => setShowTeamForm(true)}
-          className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 rounded-2xl font-bold text-sm tracking-widest uppercase flex items-center gap-2 group transition-all shadow-lg shadow-indigo-600/10"
-        >
-          <UserPlus size={18} className="group-hover:rotate-12 transition-transform" />
-          Create New Team
-        </button>
+        <div className="flex flex-col sm:flex-row gap-4 items-stretch">
+          <div className="relative">
+            <input 
+              type="text"
+              placeholder="FILTER MY TEAMS..."
+              value={teamSearchTerm}
+              onChange={(e) => setTeamSearchTerm(e.target.value)}
+              className="w-full sm:w-64 bg-white/5 border border-white/10 rounded-2xl px-6 py-3 text-xs font-mono focus:border-indigo-500 outline-none uppercase"
+            />
+          </div>
+          <button 
+            onClick={() => setShowTeamForm(true)}
+            className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 rounded-2xl font-bold text-sm tracking-widest uppercase flex items-center gap-2 group transition-all shadow-lg shadow-indigo-600/10"
+          >
+            <UserPlus size={18} className="group-hover:rotate-12 transition-transform" />
+            Create New Team
+          </button>
+        </div>
       </div>
 
       {showTeamForm && <TeamForm onClose={() => setShowTeamForm(false)} onSuccess={fetchTeams} />}
@@ -168,7 +212,7 @@ export function TeamManagement() {
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {teams.length > 0 ? teams.map((team) => (
+        {filteredMyTeams.length > 0 ? filteredMyTeams.map((team) => (
           <div 
             key={team.id} 
             onClick={() => {
@@ -261,10 +305,29 @@ export function TeamManagement() {
 
       {/* Suggested Teams to Join */}
       <div className="pt-10">
-        <h3 className="text-xl font-bold italic tracking-tight uppercase mb-6 flex items-center gap-2">
-          <Star className="text-yellow-500" size={20} />
-          Open Recruitments
-        </h3>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
+          <h3 className="text-xl font-bold italic tracking-tight uppercase flex items-center gap-2">
+            <Star className="text-yellow-500" size={20} />
+            Open Recruitments
+          </h3>
+          <div className="flex gap-2 flex-1 max-w-md">
+            <input 
+              type="text"
+              placeholder="SEARCH SQUADS TO JOIN..."
+              value={globalSearchTerm}
+              onChange={(e) => setGlobalSearchTerm(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && searchGlobalTeams()}
+              className="flex-1 bg-white/5 border border-white/10 rounded-xl px-6 py-3 text-xs font-mono focus:border-indigo-500 outline-none uppercase"
+            />
+            <button 
+              onClick={searchGlobalTeams}
+              disabled={searchingGlobal}
+              className="bg-indigo-600 hover:bg-indigo-700 px-6 py-3 rounded-xl text-xs font-bold uppercase transition-all flex items-center justify-center min-w-[100px]"
+            >
+              {searchingGlobal ? <Loader2 size={16} className="animate-spin" /> : 'Search'}
+            </button>
+          </div>
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {openRecruitments.length > 0 ? openRecruitments.map((team) => (
             <JoinCard 

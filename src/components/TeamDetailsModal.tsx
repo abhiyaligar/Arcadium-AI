@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/AuthContext';
 import { X, Check, Trash2, MessageSquare, Users, Shield, Send, Loader2 } from 'lucide-react';
@@ -21,8 +21,19 @@ export function TeamDetailsModal({ team, onClose, onUpdate }: TeamDetailsModalPr
   const [newMessage, setNewMessage] = useState('');
   const [sendingMsg, setSendingMsg] = useState(false);
   const [activeTab, setActiveTab] = useState<'chat' | 'members'>('chat');
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const [loadingMessages, setLoadingMessages] = useState(false);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  useEffect(() => {
+    if (activeTab === 'chat' && messages.length > 0) {
+      scrollToBottom();
+    }
+  }, [messages, activeTab]);
 
   useEffect(() => {
     fetchMembers(true);
@@ -112,25 +123,38 @@ export function TeamDetailsModal({ team, onClose, onUpdate }: TeamDetailsModalPr
         .update({ status: 'approved' })
         .eq('id', memberId);
 
-      if (error) throw error;
+      if (error) {
+        console.error('Approval update failed:', error);
+        throw error;
+      }
       
       // Send approval email
       const member = members.find(m => m.id === memberId);
       const mProfileData = member?.profiles;
       const mProfile = Array.isArray(mProfileData) ? mProfileData[0] : mProfileData;
       
-      if (mProfile?.email) {
-        EmailService.sendJoinSquadApproval(mProfile.email, mProfile.full_name, team.name);
+      try {
+        if (mProfile?.email) {
+          EmailService.sendJoinSquadApproval(mProfile.email, mProfile.full_name, team.name);
+        }
+      } catch (emailErr) {
+        console.warn('Failed to send approval email:', emailErr);
       }
 
-      // Increment member count in teams table
-      await supabase.rpc('increment_team_count', { team_id_input: team.id });
+      // Try to increment member count, but don't block on it if it fails
+      try {
+        const { error: rpcError } = await supabase.rpc('increment_team_count', { team_id_input: team.id });
+        if (rpcError) console.warn('RPC increment_team_count failed:', rpcError);
+      } catch (rpcErr) {
+        console.warn('RPC increment_team_count exception:', rpcErr);
+      }
       
       toast.success(`${name} is now a squad member!`);
       fetchMembers();
       onUpdate();
     } catch (e: any) {
-      toast.error(e.message);
+      console.error('Handle approve exception:', e);
+      toast.error(e.message || 'Failed to approve member');
     }
   };
 
@@ -241,11 +265,11 @@ export function TeamDetailsModal({ team, onClose, onUpdate }: TeamDetailsModalPr
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-hidden flex flex-col">
+        <div className="flex-1 overflow-hidden flex flex-col min-h-0">
           {activeTab === 'chat' ? (
-            <div className="flex-1 flex flex-col">
+            <div className="flex-1 flex flex-col min-h-0">
               {/* Messages Area */}
-              <div className="flex-1 overflow-y-auto p-8 space-y-6 custom-scrollbar">
+              <div className="flex-1 overflow-y-auto p-8 space-y-6 custom-scrollbar min-h-0">
                 {loadingMembers ? (
                   <div className="h-full flex flex-col items-center justify-center">
                     <Loader2 className="animate-spin text-indigo-500 mb-2" size={32} />
@@ -309,6 +333,7 @@ export function TeamDetailsModal({ team, onClose, onUpdate }: TeamDetailsModalPr
                         <p className="text-xs font-mono uppercase tracking-widest">No signals detected yet...</p>
                       </div>
                     )}
+                    <div ref={messagesEndRef} />
                   </>
                 )}
               </div>
@@ -333,7 +358,7 @@ export function TeamDetailsModal({ team, onClose, onUpdate }: TeamDetailsModalPr
               </form>
             </div>
           ) : (
-            <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
+            <div className="flex-1 overflow-y-auto p-8 custom-scrollbar min-h-0">
               {/* Pending Requests Section */}
               {team.is_leader && pendingMembers.length > 0 && (
                 <div className="mb-10 space-y-4">
